@@ -1,0 +1,799 @@
+/* =========================================================
+   ROOT THEME VARIABLES
+   - Global color palette
+   - Radii, shadows, typography, transitions
+========================================================= */
+:root {
+    --color-bg: radial-gradient(circle at top, #3a3d40 0, #151719 45%, #0c0d0f 100%);
+    --color-surface: rgba(34, 36, 38, 0.92);
+    --color-surface-soft: #2b2d31;
+    --color-border-subtle: #3d3f48;
+    --color-border-strong: #4f5260;
+
+    --color-text-main: #f2f2f2;
+    --color-text-muted: #a7a9b4;
+    --color-text-soft: #9a9dac;
+
+    --color-primary: #6f74ff;
+    --color-primary-soft: #8c91ff;
+    --color-primary-strong: #9a63ff;
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+
+    --shadow-soft: 0 10px 20px rgba(0, 0, 0, 0.55);
+    --shadow-strong: 0 20px 40px rgba(0, 0, 0, 0.6);
+
+    --font-main: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Arial, Helvetica, sans-serif;
+
+    --transition-fast: 0.15s ease;
+    --transition-med: 0.25s ease;
+}
+
+/* =========================================================
+   GLOBAL RESET / BASIC STRUCTURE
+========================================================= */
+
+/* Use border-box so padding/borders don't inflate element size */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
+
+/* Let the document grow with content */
+html {
+    min-height: 100%;
+}
+
+/* Base body styling: fixed gradient background */
+body {
+    min-height: 100vh;
+    font-family: var(--font-main);
+    color: var(--color-text-main);
+
+    /* Gradient background anchored at the top */
+    background-image: var(--color-bg);
+    background-color: #0c0d0f;   /* fallback */
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    background-size: cover;
+}
+
+/* =========================================================
+   TYPOGRAPHY & LINKS
+========================================================= */
+
+/* Heading defaults */
+h1, h2, h3, h4, h5, h6 {
+    margin: 0 0 0.5em;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+/* Paragraph defaults */
+p {
+    margin: 0 0 1em;
+    color: var(--color-text-main);
+}
+
+/* Anchor defaults */
+a {
+    color: var(--color-primary-soft);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+/* Anchor hover state */
+a:hover {
+    color: #b0b4ff;
+}
+
+/* Muted text helper class */
+.text-muted {
+    color: var(--color-text-muted);
+}
+
+.hr {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.06); /* same as card/subnav lines */
+    margin: 5px 0;
+    opacity: 0.9;
+}
+
+/* =========================================================
+   ALERTS (GLOBAL FEEDBACK MESSAGES)
+========================================================= */
+
+/* Base alert container */
+.alert {
+    position: relative;
+    padding: 0.8rem 1.2rem;
+    margin-bottom: 1rem;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(27, 31, 38, 0.92);
+    box-shadow:
+        0 10px 22px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    font-family: var(--font-main);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--color-text-main);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+}
+
+/* Vertical accent bar on the left edge of alerts */
+.alert::before {
+    content: "";
+    width: 3px;
+    border-radius: 999px;
+    align-self: stretch;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Links inside alert content */
+.alert a {
+    color: var(--color-primary-soft);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+/* Link hover inside alerts */
+.alert a:hover {
+    color: #b0b4ff;
+}
+
+/* Close (dismiss) button inside alerts */
+.alert .close-btn {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.6rem;
+    color: inherit;
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    opacity: 0.85;
+    transition: opacity 0.2s ease;
+}
+
+/* Close button hover state */
+.alert .close-btn:hover {
+    opacity: 1;
+}
+
+/* Success alert variant */
+.alert-success {
+    border-color: rgba(76, 175, 80, 0.5);
+    background: linear-gradient(
+        135deg,
+        rgba(46, 139, 87, 0.55),
+        rgba(15, 76, 50, 0.9)
+    );
+    color: #e4ffe9;
+}
+
+/* Success alert accent bar */
+.alert-success::before {
+    background: rgba(76, 175, 80, 0.9);
+}
+
+/* Danger/critical alert variant */
+.alert-danger {
+    border-color: rgba(244, 67, 54, 0.55);
+    background: linear-gradient(
+        135deg,
+        rgba(183, 28, 28, 0.65),
+        rgba(121, 18, 18, 0.95)
+    );
+    color: #ffe6e6;
+}
+
+/* Danger alert accent bar */
+.alert-danger::before {
+    background: rgba(244, 67, 54, 0.95);
+}
+
+/* Warning alert variant */
+.alert-warning {
+    border-color: rgba(255, 193, 7, 0.6);
+    background: linear-gradient(
+        135deg,
+        rgba(255, 193, 7, 0.5),
+        rgba(133, 94, 0, 0.95)
+    );
+    color: #fff4d2;
+}
+
+/* Warning alert accent bar */
+.alert-warning::before {
+    background: rgba(255, 193, 7, 0.95);
+}
+
+/* Informational alert variant */
+.alert-info {
+    border-color: rgba(0, 168, 255, 0.65);
+    background: linear-gradient(
+        135deg,
+        rgba(0, 168, 255, 0.55),
+        rgba(5, 60, 94, 0.98)
+    );
+    color: #e0f7ff;
+}
+
+/* Info alert accent bar */
+.alert-info::before {
+    background: rgba(0, 168, 255, 0.95);
+}
+
+/* Fade-out transition class for alerts (used by JS dismissal) */
+.alert.fade-out {
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* =========================================================
+   GLOBAL LAYOUT CONTAINER
+========================================================= */
+
+/* Wrapper that makes header + main + footer fill viewport height */
+.page-wrapper {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* =========================================================
+   HEADER / NAVIGATION BAR
+========================================================= */
+
+/* Main site header: sticky, translucent dark band */
+.site-header {
+    background: rgba(10, 11, 14, 0.9);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+}
+
+/* Inner header layout: logo on left, nav on right */
+.site-header-inner {
+    max-width: none;
+    margin: 0 auto;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Site logo / brand text */
+.site-logo {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* Horizontal nav container */
+.site-nav {
+    display: flex;
+    gap: 16px;
+}
+
+/* Nav links styling */
+.site-nav a {
+    font-size: 14px;
+    color: var(--color-text-muted);
+    padding: 6px 10px;
+    border-radius: 999px;
+    transition:
+        background var(--transition-fast),
+        color var(--transition-fast);
+}
+
+/* Nav hover state */
+.site-nav a:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-text-main);
+}
+
+/* =========================================================
+   MAIN CONTENT AREA
+========================================================= */
+
+/* Primary content wrapper below header */
+.site-main {
+    flex: 1;
+    max-width: 1400px !important;      /* allow full width (dashboard handles its own max if needed) */
+    width: 100%;
+    margin: 0px auto;
+    padding: 24px 20px 40px;
+}
+
+/* =========================================================
+   MOBILE SIDEBAR TOGGLE (DASHBOARD)
+========================================================= */
+
+/* Toggle button for collapsing/expanding sidebar on mobile */
+.sidebar-toggle {
+    display: none; /* visible on small screens via media query */
+    align-items: center;
+    justify-content: center;
+    padding: 6px 10px;
+    margin-left: auto;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(34, 36, 38, 0.95);
+    color: #f2f2f2;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+/* Sidebar toggle hover state */
+.sidebar-toggle:hover {
+    background: rgba(60, 63, 70, 0.95);
+}
+
+/* =========================================================
+   FOOTER
+========================================================= */
+
+/* Global footer bar at bottom of page */
+.site-footer {
+    padding: 16px 20px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--color-text-soft);
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(10, 11, 14, 0.85);
+}
+
+/* =========================================================
+   GLOBAL CARD COMPONENTS
+========================================================= */
+
+/* Generic card container used around the site */
+.card {
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-soft);
+    padding: 20px 22px;
+    border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+/* Card header area (title line) */
+.card-header {
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 8px;
+}
+
+/* Card title text */
+.card-title {
+    font-size: 18px;
+    margin: 0;
+}
+
+/* Card body content wrapper */
+.card-body {
+    font-size: 14px;
+}
+
+/* =========================================================
+   SIMPLE GRID UTILITIES
+========================================================= */
+
+/* Two-column grid helper (auto collapse on small screens) */
+.grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+}
+
+/* Single-column layout on small screens */
+@media (max-width: 768px) {
+    .grid-2 {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* =========================================================
+   GLOBAL FORMS & CONTROLS
+========================================================= */
+
+/* Base label styling */
+label {
+    display: inline-block;
+    margin-bottom: 5px;
+    font-size: 14px;
+    color: #cfd1dc;
+}
+
+/* Textual input-style controls (inputs, textarea, select) */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+textarea,
+select {
+    width: 100%;
+    padding: 10px 11px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border-subtle);
+    background: #27292f;
+    color: var(--color-text-main);
+    font-size: 14px;
+    outline: none;
+    transition:
+        background var(--transition-fast),
+        border-color var(--transition-fast),
+        box-shadow var(--transition-fast),
+        transform 0.1s ease;
+}
+
+/* Placeholder text color */
+input::placeholder,
+textarea::placeholder {
+    color: #7f828c;
+}
+
+/* Focus state for inputs, textareas, selects */
+input:focus,
+textarea:focus,
+select:focus {
+    background: #2f3137;
+    border-color: var(--color-primary-soft);
+    box-shadow: 0 0 0 1px rgba(123, 128, 255, 0.5);
+    transform: translateY(-1px);
+}
+
+/* =========================================================
+   BUTTONS
+========================================================= */
+
+/* Primary button styling (applies to <button> and .btn) */
+button,
+.btn {
+    display: inline-block;
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: none;
+    cursor: pointer;
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-strong));
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    transition:
+        transform 0.12s ease,
+        box-shadow 0.15s ease,
+        filter 0.15s ease;
+}
+
+/* Button hover state */
+button:hover,
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.6);
+    filter: brightness(1.04);
+}
+
+/* Button active (pressed) state */
+button:active,
+.btn:active {
+    transform: translateY(0);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
+    filter: brightness(0.97);
+}
+
+/* Disabled button state */
+button:disabled,
+.btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+    box-shadow: none;
+    transform: none;
+}
+
+/* Secondary (neutral) button variant */
+.btn-secondary {
+    background: #3a3d46;
+    border: 1px solid var(--color-border-strong);
+    text-transform: none;
+    letter-spacing: 0.02em;
+}
+
+/* Small helper text under inputs */
+.form-helper {
+    font-size: 12px;
+    color: var(--color-text-soft);
+    margin-top: 4px;
+}
+
+/* Error helper text under inputs */
+.form-error {
+    font-size: 12px;
+    color: #ff6b81;
+    margin-top: 4px;
+}
+
+/* =========================================================
+   MIGRATION TOOL OVERRIDES
+   - Align Bootstrap components with the Global Theme
+========================================================= */
+
+:root {
+    --cm-border: rgba(255, 255, 255, 0.08);
+}
+
+/* Constrain dashboard width slightly for readability */
+.container-xl,
+.container-lg,
+.container-md,
+.container-sm,
+.container {
+    max-width: 1140px;
+}
+
+/* Bootstrap cards: ensure our theme wins */
+.card,
+.card-body,
+.card-header {
+    background: var(--color-surface);
+    color: var(--color-text-main);
+    border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+.card.shadow-sm {
+    box-shadow: var(--shadow-soft) !important;
+}
+
+/* Subtle nested panels */
+.card-subtle {
+    background: rgba(43, 45, 49, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: none !important;
+}
+
+/* Typography helpers */
+.small,
+.form-text,
+.text-muted {
+    color: var(--color-text-soft) !important;
+}
+
+.code,
+code,
+pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Bootstrap form controls */
+.form-control,
+.form-select,
+.form-check-input,
+.form-control:focus,
+.form-select:focus {
+    background-color: #27292f !important;
+    color: var(--color-text-main) !important;
+    border: 1px solid var(--color-border-subtle) !important;
+    box-shadow: none;
+}
+
+.form-control::placeholder {
+    color: #7f828c !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+    background-color: #2f3137 !important;
+    border-color: var(--color-primary-soft) !important;
+    box-shadow: 0 0 0 1px rgba(123, 128, 255, 0.5) !important;
+}
+
+/* Checkboxes / radios */
+.form-check-input {
+    width: 1.1em;
+    height: 1.1em;
+    border-radius: 4px;
+}
+
+.form-check-input[type="radio"] {
+    border-radius: 999px;
+}
+
+.form-check-input:checked {
+    background-color: var(--color-primary) !important;
+    border-color: var(--color-primary-soft) !important;
+}
+
+/* Buttons */
+.btn {
+    border-radius: 999px !important;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-strong)) !important;
+    border: none !important;
+}
+
+.btn-primary:hover {
+    filter: brightness(1.05);
+}
+
+.btn-outline-secondary {
+    color: var(--color-text-main) !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    background: rgba(34, 36, 38, 0.25) !important;
+}
+
+.btn-outline-secondary:hover {
+    background: rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Tables */
+.table {
+    color: var(--color-text-main) !important;
+    border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.table thead th {
+    color: #ffffff !important;
+    border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+    white-space: nowrap;
+}
+
+.table td,
+.table th {
+    border-top-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) > * {
+    background-color: rgba(255, 255, 255, 0.03) !important;
+}
+
+.table-hover > tbody > tr:hover > * {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Badges */
+.badge {
+    border-radius: 999px;
+    padding: 0.35em 0.6em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.badge-soft {
+    background: rgba(111, 116, 255, 0.14);
+    color: #d9dbff;
+    border: 1px solid rgba(111, 116, 255, 0.28);
+}
+
+/* Remove harsh bootstrap page background */
+.bg-light {
+    background: transparent !important;
+}
+
+/* =========================================================
+   THEME COMPLETENESS OVERRIDES
+   - Ensure all Bootstrap utility variants used by the tool
+     match the premium theme look.
+========================================================= */
+
+/* Bootstrap badge background variants used in reports */
+.text-bg-success,
+.text-bg-warning,
+.text-bg-danger {
+    border-radius: 999px;
+    padding: 0.35em 0.6em;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.text-bg-success {
+    background: rgba(46, 204, 113, 0.18) !important;
+    color: #d7ffe8 !important;
+    border-color: rgba(46, 204, 113, 0.35) !important;
+}
+
+.text-bg-warning {
+    background: rgba(241, 196, 15, 0.18) !important;
+    color: #fff3c4 !important;
+    border-color: rgba(241, 196, 15, 0.35) !important;
+}
+
+.text-bg-danger {
+    background: rgba(231, 76, 60, 0.18) !important;
+    color: #ffd6d2 !important;
+    border-color: rgba(231, 76, 60, 0.35) !important;
+}
+
+/* Table wrapper polish */
+.table-responsive {
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(27, 31, 38, 0.35);
+    overflow: hidden;
+}
+
+.table-responsive .table {
+    margin-bottom: 0;
+}
+
+/* =========================================================
+   DARK BOOTSTRAP VARIABLE OVERRIDES
+   - Bootstrap defaults assume a light theme.
+   - Tables/utilities inherit those vars and can render white.
+   - Override the key variables/components to match the premium dark UI.
+========================================================= */
+
+:root {
+    --bs-body-bg: #0b0f14;
+    --bs-body-color: rgba(255, 255, 255, 0.88);
+    --bs-secondary-color: rgba(255, 255, 255, 0.70);
+    --bs-tertiary-color: rgba(255, 255, 255, 0.62);
+    --bs-border-color: rgba(255, 255, 255, 0.10);
+    --bs-border-color-translucent: rgba(255, 255, 255, 0.10);
+    --bs-card-bg: rgba(17, 20, 26, 0.55);
+    --bs-card-color: rgba(255, 255, 255, 0.88);
+    --bs-table-bg: transparent;
+    --bs-table-color: rgba(255, 255, 255, 0.88);
+    --bs-table-border-color: rgba(255, 255, 255, 0.08);
+    --bs-table-striped-bg: rgba(255, 255, 255, 0.03);
+    --bs-table-hover-bg: rgba(255, 255, 255, 0.05);
+}
+
+/* Utility backgrounds sometimes used by templates/components */
+.bg-white,
+.bg-body,
+.bg-body-tertiary,
+.bg-light {
+    background: rgba(17, 20, 26, 0.55) !important;
+    color: rgba(255, 255, 255, 0.88) !important;
+}
+
+/* Ensure tables never paint an opaque light background */
+.table {
+    --bs-table-bg: transparent !important;
+    --bs-table-color: rgba(255, 255, 255, 0.88);
+    --bs-table-border-color: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.88) !important;
+    background-color: transparent !important;
+}
+
+.table > :not(caption) > * > * {
+    background-color: transparent !important;
+    color: inherit;
+}
+
+.table thead th {
+    color: rgba(255, 255, 255, 0.72) !important;
+}
+
+.table td,
+.table th {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+}

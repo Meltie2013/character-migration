@@ -1,0 +1,6 @@
+# ignore config.php file
+/config/config.php
+
+# ignore logs in storage folder
+*.txt
+*.log

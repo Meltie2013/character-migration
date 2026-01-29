@@ -1,0 +1,65 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Character Migration Web UI
+ *
+ * Configure DB connections here.
+ *
+ * SECURITY NOTE:
+ * This tool is intended for trusted/internal use.
+ * Restrict access (VPN/firewall/HTTP auth).
+ */
+
+return [
+    'app' => [
+        'name' => 'Character Migration / Transfer',
+        'timezone' => 'America/Chicago',
+        'log_file' => dirname(__DIR__) . '/storage/logs/app.log',
+        // Set to true to show exception details in browser (not recommended).
+        'debug' => false,
+    ],
+
+    /**
+     * Character databases.
+     *
+     * You can configure multiple sources/destinations and select them in the UI.
+     * Each entry is an independent connection profile.
+     */
+    'character_dbs' => [
+        // Example: local schemas on the same server
+        'Source Characters' => [
+            'realm_name' => 'Realm 1',
+            'host' => '',
+            'port' => 3306,
+            'username' => '',
+            'password' => '',
+            'database' => '',
+            'charset' => 'utf8mb4',
+        ],
+        'Destination Characters' => [
+            'realm_name' => 'Realm 2',
+            'host' => '',
+            'port' => 3306,
+            'username' => '',
+            'password' => '',
+            'database' => '',
+            'charset' => 'utf8mb4',
+        ],
+    ],
+
+    /**
+     * UI Behavior
+     */
+    'ui' => [
+        // How many characters to show in the dropdown initially (search supports more).
+        'character_dropdown_limit' => 100,
+
+        // Set to true to show sample GUID mappings and missing GUID samples on the Preview page.
+        'show_guid_samples' => false,
+
+        // When show_guid_samples is enabled, how many rows to show in samples.
+        'guid_sample_limit' => 10,
+    ],
+];
