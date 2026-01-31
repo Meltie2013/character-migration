@@ -10,7 +10,20 @@ declare(strict_types=1);
 $csrfToken = $csrf->token();
 $profileNames = array_keys($profiles);
 $defaultSource = $sourceProfile ?: ($profileNames[0] ?? '');
-$defaultDest = ($profileNames[1] ?? $defaultSource);
+
+/**
+ * Choose the first profile that is not the selected source as the default destination.
+ * If only one profile exists, fall back to the source.
+ */
+$defaultDest = $defaultSource;
+foreach ($profileNames as $n)
+{
+    if ($n !== $defaultSource)
+    {
+        $defaultDest = $n;
+        break;
+    }
+}
 ?>
 
 <div class="row g-4">
@@ -37,13 +50,33 @@ $defaultDest = ($profileNames[1] ?? $defaultSource);
             <div class="col-md-6">
             <label class="form-label">To</label>
             <select class="form-select" name="dest_profile" required>
-                <?php foreach ($profileNames as $name): ?>
+                <?php
+                $destNames = [];
+                foreach ($profileNames as $n)
+                {
+                    if ($n !== $defaultSource)
+                    {
+                        $destNames[] = $n;
+                    }
+                }
+
+                // If only one profile exists, allow it to display (but it will be invalid server-side).
+                if ($destNames === [])
+                {
+                    $destNames = $profileNames;
+                }
+                ?>
+
+                <?php foreach ($destNames as $name): ?>
                 <option value="<?= htmlspecialchars($name) ?>" <?= $name === $defaultDest ? 'selected' : '' ?>>
                     <?= htmlspecialchars((string)$profiles[$name]['realm_name']) ?>
                 </option>
                 <?php endforeach; ?>
             </select>
             <div class="form-text">Select the character schema you are migrating to.</div>
+            <?php if (count($profileNames) < 2): ?>
+            <div class="form-text text-warning">Add at least two character DB profiles to migrate between different databases.</div>
+            <?php endif; ?>
             </div>
 
             <div class="col-12">

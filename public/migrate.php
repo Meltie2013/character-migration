@@ -25,6 +25,11 @@ if (!is_array($req) || !isset($req['mode'],$req['source_profile'],$req['dest_pro
 
 try
 {
+
+    if ((string)$req['source_profile'] === (string)$req['dest_profile'])
+    {
+        throw new \App\Migration\MigrationException('From and To databases must be different.');
+    }
     if ($req['mode'] === 'all')
     {
         $result = $service->executeBatch((string)$req['source_profile'], (string)$req['dest_profile']);

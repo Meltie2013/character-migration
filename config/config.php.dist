@@ -24,12 +24,14 @@ return [
     /**
      * Character databases.
      *
-     * You can configure multiple sources/destinations and select them in the UI.
+     * You can configure as many sources/destinations as you like (e.g., 2–20+ realms).
      * Each entry is an independent connection profile.
+     *
+     * Tip: Use simple, stable profile keys (e.g., 'realm1', 'realm2', ...). The UI shows realm_name.
      */
     'character_dbs' => [
         // Example: local schemas on the same server
-        'Source Characters' => [
+        'realm1' => [
             'realm_name' => 'Realm 1',
             'host' => '',
             'port' => 3306,
@@ -38,7 +40,7 @@ return [
             'database' => '',
             'charset' => 'utf8mb4',
         ],
-        'Destination Characters' => [
+        'realm2' => [
             'realm_name' => 'Realm 2',
             'host' => '',
             'port' => 3306,
@@ -46,6 +48,17 @@ return [
             'password' => '',
             'database' => '',
             'charset' => 'utf8mb4',
+
+        // Add more realms as needed:
+        // 'realm3' => [
+        //     'realm_name' => 'Realm 3',
+        //     'host' => '',
+        //     'port' => 3306,
+        //     'username' => '',
+        //     'password' => '',
+        //     'database' => '',
+        //     'charset' => 'utf8mb4',
+        // ],
         ],
     ],
 

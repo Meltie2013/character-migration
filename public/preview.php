@@ -18,6 +18,12 @@ if (!$app->csrf()->validate($_POST['csrf'] ?? null))
 $mode = (string)($_POST['mode'] ?? 'single');
 $sourceProfile = (string)($_POST['source_profile'] ?? '');
 $destProfile = (string)($_POST['dest_profile'] ?? '');
+
+if ($sourceProfile === $destProfile)
+{
+    throw new \App\Migration\MigrationException('From and To databases must be different.');
+}
+
 $srcGuid = (int)($_POST['src_guid'] ?? 0);
 $dstGuid = (int)($_POST['dst_guid'] ?? 0);
 
