@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Migration;
 
 use App\Db\ConnectionManager;
+use App\Db\SchemaInspector;
 use PDO;
 use PDOStatement;
 use Throwable;
@@ -16,11 +17,14 @@ final class MigrationService
 
     private ConnectionManager $connections;
 
+    private SchemaInspector $schema;
+
     private int $sampleLimit;
 
     public function __construct(ConnectionManager $connections, int $sampleLimit = 10)
     {
         $this->connections = $connections;
+        $this->schema = new SchemaInspector();
         $this->sampleLimit = max(1, $sampleLimit);
     }
 
@@ -91,6 +95,14 @@ final class MigrationService
 
         $plan = new MigrationPlan('single', $sourceProfile, $destProfile, $srcGuid, $dstGuidRequested);
 
+        // UI-only: detect likely character DB structure for source/destination.
+        $srcStruct = $this->schema->detectCharacterDbStructure($src);
+        $dstStruct = $this->schema->detectCharacterDbStructure($dst);
+        $plan->sourceSchemaLabel = (string)($srcStruct['label'] ?? 'Unknown');
+        $plan->destSchemaLabel = (string)($dstStruct['label'] ?? 'Unknown');
+        $plan->sourceSchemaSummary = (string)($srcStruct['summary'] ?? '');
+        $plan->destSchemaSummary = (string)($dstStruct['summary'] ?? '');
+
         // Character preview (minimal fields)
         $char = $this->fetchRow($src, 'SELECT * FROM characters WHERE guid = :g', [':g' => $srcGuid]);
         $char['final_name'] = substr((string)($char['name'] ?? ''), 0, 12);
@@ -119,12 +131,9 @@ final class MigrationService
         // NOTE: With MySQL/MariaDB PDO in native prepare mode, reusing the same named placeholder
         // multiple times inside a statement can raise:
         //   SQLSTATE[HY093]: Invalid parameter number
-        // Therefore sqlSourceItemGuids() uses distinct parameter names, and we bind them all.
-        $itemGuids = $this->fetchColumnInts($src, $this->sqlSourceItemGuids(), [
-            ':g1' => $srcGuid,
-            ':g2' => $srcGuid,
-            ':g3' => $srcGuid,
-            ]);
+        // Therefore the item GUID query uses distinct parameter names, and we bind them all.
+        [$itemSql, $itemParams] = $this->buildSourceItemGuidsQuery($src, $srcGuid);
+        $itemGuids = $this->fetchColumnInts($src, $itemSql, $itemParams);
 
         sort($itemGuids);
         $itemBase = $this->nextGuid($dst, 'item_instance', 'guid');
@@ -179,14 +188,22 @@ final class MigrationService
         }
 
         // Build pet map (src_pet_id => dst_pet_id)
-        $petIds = $this->fetchColumnInts($src, 'SELECT id FROM character_pet WHERE owner = :g ORDER BY id', [':g' => $srcGuid]);
-        $petBase = $this->nextGuid($dst, 'character_pet', 'id');
+        $petIds = [];
         $pmap = [];
-        $pseq = $petBase;
-        foreach ($petIds as $pid)
+
+        if ($this->schema->tableExists($src, 'character_pet') && $this->schema->tableExists($dst, 'character_pet')
+            && $this->schema->columnExists($src, 'character_pet', 'id') && $this->schema->columnExists($src, 'character_pet', 'owner')
+            && $this->schema->columnExists($dst, 'character_pet', 'id'))
         {
-            $pmap[$pid] = $pseq;
-            $pseq++;
+            $petIds = $this->fetchColumnInts($src, 'SELECT id FROM character_pet WHERE owner = :g ORDER BY id', [':g' => $srcGuid]);
+            $petBase = $this->nextGuid($dst, 'character_pet', 'id');
+
+            $pseq = $petBase;
+            foreach ($petIds as $pid)
+            {
+                $pmap[$pid] = $pseq;
+                $pseq++;
+            }
         }
 
         $plan->petMap = $pmap;
@@ -203,6 +220,14 @@ final class MigrationService
         $dst = $this->connections->getCharacter($destProfile);
 
         $plan = new MigrationPlan('all', $sourceProfile, $destProfile, 0, 0);
+
+        // UI-only: detect likely character DB structure for source/destination.
+        $srcStruct = $this->schema->detectCharacterDbStructure($src);
+        $dstStruct = $this->schema->detectCharacterDbStructure($dst);
+        $plan->sourceSchemaLabel = (string)($srcStruct['label'] ?? 'Unknown');
+        $plan->destSchemaLabel = (string)($dstStruct['label'] ?? 'Unknown');
+        $plan->sourceSchemaSummary = (string)($srcStruct['summary'] ?? '');
+        $plan->destSchemaSummary = (string)($dstStruct['summary'] ?? '');
 
         $rows = $src->query('SELECT guid, name FROM characters WHERE guid > 0 ORDER BY guid')->fetchAll() ?: [];
         $next = $this->nextGuid($dst, 'characters', 'guid');
@@ -260,6 +285,10 @@ final class MigrationService
 
         $result = new MigrationResult();
 
+        // UI-only: carry schema labels through to the results page.
+        $result->sourceSchemaLabel = $plan->sourceSchemaLabel;
+        $result->destSchemaLabel = $plan->destSchemaLabel;
+
         $this->migrateOne($src, $dst, $plan->srcGuid, $dstGuid, $finalName, $plan->itemMap, $plan->petMap, $plan->forceRename, $result);
 
         // Read final character from destination
@@ -289,6 +318,12 @@ final class MigrationService
         $dst = $this->connections->getCharacter($destProfile);
 
         $result = new MigrationResult();
+
+        // UI-only: detect likely character DB structure for source/destination.
+        $srcStruct = $this->schema->detectCharacterDbStructure($src);
+        $dstStruct = $this->schema->detectCharacterDbStructure($dst);
+        $result->sourceSchemaLabel = (string)($srcStruct['label'] ?? 'Unknown');
+        $result->destSchemaLabel = (string)($dstStruct['label'] ?? 'Unknown');
 
         $guids = $this->fetchColumnInts($src, 'SELECT guid FROM characters WHERE guid > 0 ORDER BY guid');
         foreach ($guids as $srcGuid)
@@ -350,7 +385,13 @@ final class MigrationService
             $dst->exec('SET FOREIGN_KEY_CHECKS = 0');
 
             // characters
-            $char = $this->fetchRow($src, $this->sqlCharactersSelect(), [':g' => $srcGuid]);
+            $charCols = $this->resolveCommonColumns($src, $dst, 'characters', ['guid', 'account', 'name'], $result);
+            if (!$charCols)
+            {
+                throw new MigrationException('Schema mismatch: unable to find compatible columns for characters table between source and destination.');
+            }
+
+            $char = $this->fetchRow($src, 'SELECT ' . $this->schema->selectList($charCols) . ' FROM `characters` WHERE guid = :g', [':g' => $srcGuid]);
             if (!$char)
             {
                 throw new MigrationException('Source character GUID not found in source schema (characters table).');
@@ -359,12 +400,12 @@ final class MigrationService
             $char['guid'] = $dstGuid;
             $char['name'] = $finalName;
 
-            if ($forceRename)
+            if ($forceRename && in_array('at_login', $charCols, true))
             {
                 $char['at_login'] = ((int)($char['at_login'] ?? 0) | 1);
             }
 
-            $this->insertOne($dst, 'characters', $this->charactersColumns(), $char, $result, 'characters');
+            $this->insertOne($dst, 'characters', $charCols, $char, $result, 'characters');
 
             // character_tutorial (account-level tutorial completion flags)
             // This table is keyed by characters.account (account id). It is not character-owned by guid,
@@ -376,60 +417,82 @@ final class MigrationService
             }
 
             // corpse (set both corpse.guid and corpse.player to new guid)
-            $corpseRows = $this->fetchAll($src, 'SELECT guid, player, position_x, position_y, position_z, orientation, map, time, corpse_type, instance FROM corpse WHERE player = :g', [':g' => $srcGuid]);
-            foreach ($corpseRows as &$r)
+            $corpseCols = $this->resolveCommonColumns($src, $dst, 'corpse', ['guid', 'player'], $result);
+            if ($corpseCols)
             {
-                $r['guid'] = $dstGuid;
-                $r['player'] = $dstGuid;
+                $corpseRows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($corpseCols) . ' FROM `corpse` WHERE player = :g', [':g' => $srcGuid]);
+                foreach ($corpseRows as &$r)
+                {
+                    if (array_key_exists('guid', $r))
+                    {
+                        $r['guid'] = $dstGuid;
+                    }
+                    if (array_key_exists('player', $r))
+                    {
+                        $r['player'] = $dstGuid;
+                    }
+                }
+
+                unset($r);
+                $this->bulkInsert($dst, 'corpse', $corpseCols, $corpseRows, $result, 'corpse');
             }
 
-            unset($r);
-            $this->bulkInsert($dst, 'corpse', ['guid', 'player', 'position_x', 'position_y', 'position_z', 'orientation', 'map', 'time', 'corpse_type', 'instance'], $corpseRows, $result, 'corpse');
-
             // item_instance (for mapped items)
+            $itemCols = $this->resolveCommonColumns($src, $dst, 'item_instance', ['guid', 'data'], $result);
             $srcItemGuids = array_keys($itemMap);
             sort($srcItemGuids);
             $missingItemInstances = [];
-            foreach (array_chunk($srcItemGuids, self::IN_CHUNK) as $chunk)
+
+            if ($itemCols)
             {
-                $in = $this->placeholders(count($chunk));
-                $stmt = $src->prepare("SELECT guid, data, text FROM item_instance WHERE guid IN ($in)");
-                $this->bindIntList($stmt, $chunk);
-                $stmt->execute();
-                $items = $stmt->fetchAll() ?: [];
-
-                $found = [];
-                foreach ($items as $it)
+                foreach (array_chunk($srcItemGuids, self::IN_CHUNK) as $chunk)
                 {
-                    $found[(int)$it['guid']] = true;
-                }
+                    $in = $this->placeholders(count($chunk));
+                    $stmt = $src->prepare('SELECT ' . $this->schema->selectList($itemCols) . " FROM `item_instance` WHERE guid IN ($in)");
+                    $this->bindIntList($stmt, $chunk);
+                    $stmt->execute();
+                    $items = $stmt->fetchAll() ?: [];
 
-                foreach ($chunk as $g)
-                {
-                    if (!isset($found[$g]))
+                    $found = [];
+                    foreach ($items as $it)
                     {
-                        $missingItemInstances[] = $g;
-                    }
-                }
-
-                $out = [];
-                foreach ($items as $it)
-                {
-                    $sg = (int)$it['guid'];
-                    if (!isset($itemMap[$sg]))
-                    {
-                        continue;
+                        $found[(int)$it['guid']] = true;
                     }
 
-                    $out[] = [
-                        'guid' => $itemMap[$sg],
-                        'owner_guid' => $dstGuid,
-                        'data' => $it['data'],
-                        'text' => $it['text'],
-                    ];
-                }
+                    foreach ($chunk as $g)
+                    {
+                        if (!isset($found[$g]))
+                        {
+                            $missingItemInstances[] = $g;
+                        }
+                    }
 
-                $this->bulkInsert($dst, 'item_instance', ['guid', 'owner_guid', 'data', 'text'], $out, $result, 'item_instance');
+                    $out = [];
+                    foreach ($items as $it)
+                    {
+                        $sg = (int)$it['guid'];
+                        if (!isset($itemMap[$sg]))
+                        {
+                            continue;
+                        }
+
+                        $row = [];
+                        foreach ($itemCols as $c)
+                        {
+                            $row[$c] = $it[$c] ?? null;
+                        }
+
+                        $row['guid'] = $itemMap[$sg];
+                        if (in_array('owner_guid', $itemCols, true))
+                        {
+                            $row['owner_guid'] = $dstGuid;
+                        }
+
+                        $out[] = $row;
+                    }
+
+                    $this->bulkInsert($dst, 'item_instance', $itemCols, $out, $result, 'item_instance');
+                }
             }
 
             if ($missingItemInstances)
@@ -440,261 +503,415 @@ final class MigrationService
                     'Detected %d mapped item GUID(s) referenced by the character that do not exist in source item_instance. This mirrors the SQL behavior (item_instance insert is a JOIN). Sample missing GUID(s): %s%s',
                     count($missingItemInstances),
                     implode(', ', $sample),
-                    count($missingItemInstances) > count($sample) ? ' ...' : ''
+                    (count($missingItemInstances) > count($sample)) ? ' ...' : ''
                 );
             }
 
             // character_inventory (map bag + item guids)
-            $inv = $this->fetchAll($src, 'SELECT bag, slot, item, item_template FROM character_inventory WHERE guid = :g', [':g' => $srcGuid]);
-            $invOut = [];
-            foreach ($inv as $row)
+            $invCols = $this->resolveCommonColumns($src, $dst, 'character_inventory', ['guid', 'slot', 'item'], $result);
+            if ($invCols)
             {
-                $item = (int)$row['item'];
-                $bag = (int)$row['bag'];
-                if ($item === 0 || !isset($itemMap[$item]))
+                $inv = $this->fetchAll($src, 'SELECT bag, slot, item, item_template FROM `character_inventory` WHERE guid = :g', [':g' => $srcGuid]);
+                $invOut = [];
+
+                foreach ($inv as $row)
                 {
-                    continue;
-                }
+                    $item = (int)$row['item'];
+                    $bag = (int)$row['bag'];
 
-                $invOut[] = [
-                    'guid' => $dstGuid,
-                    'bag' => ($bag === 0) ? 0 : ($itemMap[$bag] ?? 0),
-                    'slot' => (int)$row['slot'],
-                    'item' => $itemMap[$item],
-                    'item_template' => (int)$row['item_template'],
-                ];
-            }
-
-            $this->bulkInsert($dst, 'character_inventory', ['guid', 'bag', 'slot', 'item', 'item_template'], $invOut, $result, 'character_inventory');
-
-            // character_action
-            $rows = $this->fetchAll($src, 'SELECT button, action, type FROM character_action WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_action', ['guid', 'button', 'action', 'type'], $rows, $result, 'character_action');
-
-            // character_aura (clear item_guid to avoid migrating stale item attribution GUIDs)
-            $rows = $this->fetchAll($src, 'SELECT caster_guid, item_guid, spell, stackcount, remaincharges, basepoints0, basepoints1, basepoints2, periodictime0, periodictime1, periodictime2, maxduration, remaintime, effIndexMask FROM character_aura WHERE guid = :g', [':g' => $srcGuid]);
-            $out = [];
-            foreach ($rows as $r)
-            {
-                $ig = (int)$r['item_guid'];
-                $out[] = [
-                    'guid' => $dstGuid,
-                    'caster_guid' => (int)$r['caster_guid'],
-                    'item_guid' => 0,
-                    'spell' => (int)$r['spell'],
-                    'stackcount' => (int)$r['stackcount'],
-                    'remaincharges' => (int)$r['remaincharges'],
-                    'basepoints0' => (int)$r['basepoints0'],
-                    'basepoints1' => (int)$r['basepoints1'],
-                    'basepoints2' => (int)$r['basepoints2'],
-                    'periodictime0' => (int)$r['periodictime0'],
-                    'periodictime1' => (int)$r['periodictime1'],
-                    'periodictime2' => (int)$r['periodictime2'],
-                    'maxduration' => (int)$r['maxduration'],
-                    'remaintime' => (int)$r['remaintime'],
-                    'effIndexMask' => (int)$r['effIndexMask'],
-                ];
-            }
-
-            $this->bulkInsert($dst, 'character_aura', ['guid', 'caster_guid', 'item_guid', 'spell', 'stackcount', 'remaincharges', 'basepoints0', 'basepoints1', 'basepoints2', 'periodictime0', 'periodictime1', 'periodictime2', 'maxduration', 'remaintime', 'effIndexMask'], $out, $result, 'character_aura');
-
-            // character_battleground_data
-            $rows = $this->fetchAll($src, 'SELECT instance_id, team, join_x, join_y, join_z, join_o, join_map FROM character_battleground_data WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_battleground_data', ['guid', 'instance_id', 'team', 'join_x', 'join_y', 'join_z', 'join_o', 'join_map'], $rows, $result, 'character_battleground_data');
-
-            // character_gifts (map item_guid)
-            $rows = $this->fetchAll($src, 'SELECT item_guid, entry, flags FROM character_gifts WHERE guid = :g', [':g' => $srcGuid]);
-            $out = [];
-            foreach ($rows as $r)
-            {
-                $ig = (int)$r['item_guid'];
-                if ($ig === 0 || !isset($itemMap[$ig]))
-                {
-                    continue;
-                }
-
-                $out[] = [
-                    'guid' => $dstGuid,
-                    'item_guid' => $itemMap[$ig],
-                    'entry' => (int)$r['entry'],
-                    'flags' => (int)$r['flags'],
-                ];
-            }
-
-            $this->bulkInsert($dst, 'character_gifts', ['guid', 'item_guid', 'entry', 'flags'], $out, $result, 'character_gifts');
-
-            // character_homebind
-            $rows = $this->fetchAll($src, 'SELECT map, zone, position_x, position_y, position_z FROM character_homebind WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_homebind', ['guid', 'map', 'zone', 'position_x', 'position_y', 'position_z'], $rows, $result, 'character_homebind');
-
-            // character_honor_cp
-            $rows = $this->fetchAll($src, 'SELECT victim_type, victim, honor, date, type, used FROM character_honor_cp WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_honor_cp', ['guid', 'victim_type', 'victim', 'honor', 'date', 'type', 'used'], $rows, $result, 'character_honor_cp');
-
-            // character_instance
-            $rows = $this->fetchAll($src, 'SELECT instance, permanent FROM character_instance WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_instance', ['guid', 'instance', 'permanent'], $rows, $result, 'character_instance');
-
-            // character_queststatus
-            $rows = $this->fetchAll($src, 'SELECT quest, status, rewarded, explored, timer, mobcount1, mobcount2, mobcount3, mobcount4, itemcount1, itemcount2, itemcount3, itemcount4 FROM character_queststatus WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_queststatus', ['guid', 'quest', 'status', 'rewarded', 'explored', 'timer', 'mobcount1', 'mobcount2', 'mobcount3', 'mobcount4', 'itemcount1', 'itemcount2', 'itemcount3', 'itemcount4'], $rows, $result, 'character_queststatus');
-
-            // character_reputation
-            $rows = $this->fetchAll($src, 'SELECT faction, standing, flags FROM character_reputation WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_reputation', ['guid', 'faction', 'standing', 'flags'], $rows, $result, 'character_reputation');
-
-            // character_skills
-            $rows = $this->fetchAll($src, 'SELECT skill, value, max FROM character_skills WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_skills', ['guid', 'skill', 'value', 'max'], $rows, $result, 'character_skills');
-
-            // character_spell
-            $rows = $this->fetchAll($src, 'SELECT spell, active, disabled FROM character_spell WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_spell', ['guid', 'spell', 'active', 'disabled'], $rows, $result, 'character_spell');
-
-            // character_spell_cooldown
-            $rows = $this->fetchAll($src, 'SELECT spell, item, time FROM character_spell_cooldown WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_spell_cooldown', ['guid', 'spell', 'item', 'time'], $rows, $result, 'character_spell_cooldown');
-
-            // character_stats
-            $rows = $this->fetchAll($src, 'SELECT maxhealth, maxpower1, maxpower2, maxpower3, maxpower4, maxpower5, maxpower6, maxpower7, strength, agility, stamina, intellect, spirit, armor, resHoly, resFire, resNature, resFrost, resShadow, resArcane, blockPct, dodgePct, parryPct, critPct, rangedCritPct, attackPower, rangedAttackPower FROM character_stats WHERE guid = :g', [':g' => $srcGuid]);
-            $this->bulkInsertGuided($dstGuid, $dst, 'character_stats', ['guid', 'maxhealth', 'maxpower1', 'maxpower2', 'maxpower3', 'maxpower4', 'maxpower5', 'maxpower6', 'maxpower7', 'strength', 'agility', 'stamina', 'intellect', 'spirit', 'armor', 'resHoly', 'resFire', 'resNature', 'resFrost', 'resShadow', 'resArcane', 'blockPct', 'dodgePct', 'parryPct', 'critPct', 'rangedCritPct', 'attackPower', 'rangedAttackPower'], $rows, $result, 'character_stats');
-
-            // character_pet (map pet IDs; owner becomes dst guid)
-            $rows = $this->fetchAll($src, 'SELECT id, entry, modelid, CreatedBySpell, PetType, level, exp, Reactstate, loyaltypoints, loyalty, trainpoint, name, renamed, slot, curhealth, curmana, curhappiness, savetime, resettalents_cost, resettalents_time, abdata, teachspelldata FROM character_pet WHERE owner = :g ORDER BY id', [':g' => $srcGuid]);
-            $out = [];
-            foreach ($rows as $r)
-            {
-                $sid = (int)$r['id'];
-                if (!isset($petMap[$sid]))
-                {
-                    continue;
-                }
-
-                $out[] = [
-                    'id' => $petMap[$sid],
-                    'entry' => (int)$r['entry'],
-                    'owner' => $dstGuid,
-                    'modelid' => (int)$r['modelid'],
-                    'CreatedBySpell' => (int)$r['CreatedBySpell'],
-                    'PetType' => (int)$r['PetType'],
-                    'level' => (int)$r['level'],
-                    'exp' => (int)$r['exp'],
-                    'Reactstate' => (int)$r['Reactstate'],
-                    'loyaltypoints' => (int)$r['loyaltypoints'],
-                    'loyalty' => (int)$r['loyalty'],
-                    'trainpoint' => (int)$r['trainpoint'],
-                    'name' => (string)$r['name'],
-                    'renamed' => (int)$r['renamed'],
-                    'slot' => (int)$r['slot'],
-                    'curhealth' => (int)$r['curhealth'],
-                    'curmana' => (int)$r['curmana'],
-                    'curhappiness' => (int)$r['curhappiness'],
-                    'savetime' => (int)$r['savetime'],
-                    'resettalents_cost' => (int)$r['resettalents_cost'],
-                    'resettalents_time' => (int)$r['resettalents_time'],
-                    'abdata' => $r['abdata'],
-                    'teachspelldata' => $r['teachspelldata'],
-                ];
-            }
-
-            $this->bulkInsert($dst, 'character_pet', ['id', 'entry', 'owner', 'modelid', 'CreatedBySpell', 'PetType', 'level', 'exp', 'Reactstate', 'loyaltypoints', 'loyalty', 'trainpoint', 'name', 'renamed', 'slot', 'curhealth', 'curmana', 'curhappiness', 'savetime', 'resettalents_cost', 'resettalents_time', 'abdata', 'teachspelldata'], $out, $result, 'character_pet');
-
-            // pet_spell
-            $petIdsSrc = array_keys($petMap);
-            sort($petIdsSrc);
-            foreach (array_chunk($petIdsSrc, self::IN_CHUNK) as $chunk)
-            {
-                $in = $this->placeholders(count($chunk));
-                $stmt = $src->prepare("SELECT guid, spell, active FROM pet_spell WHERE guid IN ($in)");
-                $this->bindIntList($stmt, $chunk);
-                $stmt->execute();
-                $rows = $stmt->fetchAll() ?: [];
-                $out = [];
-                foreach ($rows as $r)
-                {
-                    $sg = (int)$r['guid'];
-                    if (!isset($petMap[$sg]))
+                    if ($item === 0 || !isset($itemMap[$item]))
                     {
                         continue;
                     }
 
-                    $out[] = [
-                        'guid' => $petMap[$sg],
-                        'spell' => (int)$r['spell'],
-                        'active' => (int)$r['active'],
-                    ];
+                    $outRow = [];
+                    foreach ($invCols as $c)
+                    {
+                        if ($c === 'guid')
+                        {
+                            $outRow['guid'] = $dstGuid;
+                            continue;
+                        }
+
+                        if ($c === 'bag')
+                        {
+                            $outRow['bag'] = ($bag === 0) ? 0 : ($itemMap[$bag] ?? 0);
+                            continue;
+                        }
+
+                        if ($c === 'slot')
+                        {
+                            $outRow['slot'] = (int)$row['slot'];
+                            continue;
+                        }
+
+                        if ($c === 'item')
+                        {
+                            $outRow['item'] = $itemMap[$item];
+                            continue;
+                        }
+
+                        if ($c === 'item_template')
+                        {
+                            $outRow['item_template'] = (int)$row['item_template'];
+                            continue;
+                        }
+
+                        // For any additional columns, fall back to source row if present, otherwise NULL.
+                        $outRow[$c] = $row[$c] ?? null;
+                    }
+
+                    $invOut[] = $outRow;
                 }
 
-                $this->bulkInsert($dst, 'pet_spell', ['guid', 'spell', 'active'], $out, $result, 'pet_spell');
+                $this->bulkInsert($dst, 'character_inventory', $invCols, $invOut, $result, 'character_inventory');
+            }
+
+            // character_action
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_action', ['guid', 'button', 'action', 'type'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_action` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_action', $cols, $rows, $result, 'character_action');
+            }
+
+            // character_aura (clear item_guid to avoid migrating stale item attribution GUIDs)
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_aura', ['guid', 'spell'], $result);
+            if ($cols)
+            {
+                $sel = $cols;
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_aura` WHERE guid = :g', [':g' => $srcGuid]);
+                $out = [];
+
+                foreach ($rows as $r)
+                {
+                    $row = [];
+                    foreach ($cols as $c)
+                    {
+                        if ($c === 'guid')
+                        {
+                            $row['guid'] = $dstGuid;
+                            continue;
+                        }
+
+                        if ($c === 'item_guid')
+                        {
+                            $row['item_guid'] = 0;
+                            continue;
+                        }
+
+                        $row[$c] = $r[$c] ?? null;
+                    }
+
+                    $out[] = $row;
+                }
+
+                $this->bulkInsert($dst, 'character_aura', $cols, $out, $result, 'character_aura');
+            }
+
+            // character_battleground_data
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_battleground_data', ['guid', 'instance_id'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_battleground_data` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_battleground_data', $cols, $rows, $result, 'character_battleground_data');
+            }
+
+            // character_gifts (map item_guid)
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_gifts', ['guid', 'item_guid'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_gifts` WHERE guid = :g', [':g' => $srcGuid]);
+
+                $out = [];
+                foreach ($rows as $r)
+                {
+                    $ig = (int)($r['item_guid'] ?? 0);
+                    if ($ig === 0 || !isset($itemMap[$ig]))
+                    {
+                        continue;
+                    }
+
+                    $row = [];
+                    foreach ($cols as $c)
+                    {
+                        if ($c === 'guid')
+                        {
+                            $row['guid'] = $dstGuid;
+                            continue;
+                        }
+
+                        if ($c === 'item_guid')
+                        {
+                            $row['item_guid'] = $itemMap[$ig];
+                            continue;
+                        }
+
+                        $row[$c] = $r[$c] ?? null;
+                    }
+
+                    $out[] = $row;
+                }
+
+                $this->bulkInsert($dst, 'character_gifts', $cols, $out, $result, 'character_gifts');
+            }
+
+            // character_homebind
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_homebind', ['guid', 'map'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_homebind` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_homebind', $cols, $rows, $result, 'character_homebind');
+            }
+
+            // character_honor_cp
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_honor_cp', ['guid'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_honor_cp` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_honor_cp', $cols, $rows, $result, 'character_honor_cp');
+            }
+
+            // character_instance
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_instance', ['guid', 'instance'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_instance` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_instance', $cols, $rows, $result, 'character_instance');
+            }
+
+            // character_queststatus
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_queststatus', ['guid', 'quest'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_queststatus` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_queststatus', $cols, $rows, $result, 'character_queststatus');
+            }
+
+            // character_reputation
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_reputation', ['guid', 'faction'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_reputation` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_reputation', $cols, $rows, $result, 'character_reputation');
+            }
+
+            // character_skills
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_skills', ['guid', 'skill'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_skills` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_skills', $cols, $rows, $result, 'character_skills');
+            }
+
+            // character_spell
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_spell', ['guid', 'spell'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_spell` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_spell', $cols, $rows, $result, 'character_spell');
+            }
+
+            // character_spell_cooldown
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_spell_cooldown', ['guid', 'spell'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_spell_cooldown` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_spell_cooldown', $cols, $rows, $result, 'character_spell_cooldown');
+            }
+
+            // character_stats
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_stats', ['guid', 'maxhealth'], $result);
+            if ($cols)
+            {
+                $sel = array_values(array_filter($cols, static fn($c) => $c !== 'guid'));
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($sel) . ' FROM `character_stats` WHERE guid = :g', [':g' => $srcGuid]);
+                $this->bulkInsertGuided($dstGuid, $dst, 'character_stats', $cols, $rows, $result, 'character_stats');
+            }
+
+            // character_pet (map pet IDs; owner becomes dst guid)
+            $cols = $this->resolveCommonColumns($src, $dst, 'character_pet', ['id', 'owner'], $result);
+            if ($cols)
+            {
+                $rows = $this->fetchAll($src, 'SELECT ' . $this->schema->selectList($cols) . ' FROM `character_pet` WHERE owner = :g ORDER BY id', [':g' => $srcGuid]);
+                $out = [];
+
+                foreach ($rows as $r)
+                {
+                    $sid = (int)($r['id'] ?? 0);
+                    if ($sid <= 0 || !isset($petMap[$sid]))
+                    {
+                        continue;
+                    }
+
+                    $row = [];
+                    foreach ($cols as $c)
+                    {
+                        if ($c === 'id')
+                        {
+                            $row['id'] = $petMap[$sid];
+                            continue;
+                        }
+
+                        if ($c === 'owner')
+                        {
+                            $row['owner'] = $dstGuid;
+                            continue;
+                        }
+
+                        $row[$c] = $r[$c] ?? null;
+                    }
+
+                    $out[] = $row;
+                }
+
+                $this->bulkInsert($dst, 'character_pet', $cols, $out, $result, 'character_pet');
+            }
+
+            // pet_spell
+            $petSpellCols = $this->resolveCommonColumns($src, $dst, 'pet_spell', ['guid', 'spell'], $result);
+            if ($petSpellCols)
+            {
+                $petIdsSrc = array_keys($petMap);
+                sort($petIdsSrc);
+
+                foreach (array_chunk($petIdsSrc, self::IN_CHUNK) as $chunk)
+                {
+                    $in = $this->placeholders(count($chunk));
+                    $stmt = $src->prepare('SELECT ' . $this->schema->selectList($petSpellCols) . " FROM `pet_spell` WHERE guid IN ($in)");
+                    $this->bindIntList($stmt, $chunk);
+                    $stmt->execute();
+                    $rows = $stmt->fetchAll() ?: [];
+
+                    $out = [];
+                    foreach ($rows as $r)
+                    {
+                        $sg = (int)($r['guid'] ?? 0);
+                        if ($sg <= 0 || !isset($petMap[$sg]))
+                        {
+                            continue;
+                        }
+
+                        $row = [];
+                        foreach ($petSpellCols as $c)
+                        {
+                            if ($c === 'guid')
+                            {
+                                $row['guid'] = $petMap[$sg];
+                                continue;
+                            }
+
+                            $row[$c] = $r[$c] ?? null;
+                        }
+
+                        $out[] = $row;
+                    }
+
+                    $this->bulkInsert($dst, 'pet_spell', $petSpellCols, $out, $result, 'pet_spell');
+                }
             }
 
             // pet_spell_cooldown
-            foreach (array_chunk($petIdsSrc, self::IN_CHUNK) as $chunk)
+            $petCdCols = $this->resolveCommonColumns($src, $dst, 'pet_spell_cooldown', ['guid', 'spell'], $result);
+            if ($petCdCols)
             {
-                $in = $this->placeholders(count($chunk));
-                $stmt = $src->prepare("SELECT guid, spell, time FROM pet_spell_cooldown WHERE guid IN ($in)");
-                $this->bindIntList($stmt, $chunk);
-                $stmt->execute();
-                $rows = $stmt->fetchAll() ?: [];
-                $out = [];
+                $petIdsSrc = array_keys($petMap);
+                sort($petIdsSrc);
 
-                foreach ($rows as $r)
+                foreach (array_chunk($petIdsSrc, self::IN_CHUNK) as $chunk)
                 {
-                    $sg = (int)$r['guid'];
-                    if (!isset($petMap[$sg]))
+                    $in = $this->placeholders(count($chunk));
+                    $stmt = $src->prepare('SELECT ' . $this->schema->selectList($petCdCols) . " FROM `pet_spell_cooldown` WHERE guid IN ($in)");
+                    $this->bindIntList($stmt, $chunk);
+                    $stmt->execute();
+                    $rows = $stmt->fetchAll() ?: [];
+                    $out = [];
+
+                    foreach ($rows as $r)
                     {
-                        continue;
+                        $sg = (int)($r['guid'] ?? 0);
+                        if ($sg <= 0 || !isset($petMap[$sg]))
+                        {
+                            continue;
+                        }
+
+                        $row = [];
+                        foreach ($petCdCols as $c)
+                        {
+                            if ($c === 'guid')
+                            {
+                                $row['guid'] = $petMap[$sg];
+                                continue;
+                            }
+
+                            $row[$c] = $r[$c] ?? null;
+                        }
+
+                        $out[] = $row;
                     }
 
-                    $out[] = [
-                        'guid' => $petMap[$sg],
-                        'spell' => (int)$r['spell'],
-                        'time' => (int)$r['time'],
-                    ];
+                    $this->bulkInsert($dst, 'pet_spell_cooldown', $petCdCols, $out, $result, 'pet_spell_cooldown');
                 }
-
-                $this->bulkInsert($dst, 'pet_spell_cooldown', ['guid', 'spell', 'time'], $out, $result, 'pet_spell_cooldown');
             }
 
-            // pet_aura (map pet guid; map item_guid)
-            foreach (array_chunk($petIdsSrc, self::IN_CHUNK) as $chunk)
+            // pet_aura (map pet guid; clear item_guid)
+            $petAuraCols = $this->resolveCommonColumns($src, $dst, 'pet_aura', ['guid', 'spell'], $result);
+            if ($petAuraCols)
             {
-                $in = $this->placeholders(count($chunk));
-                $stmt = $src->prepare("SELECT guid, caster_guid, item_guid, spell, stackcount, remaincharges, basepoints0, basepoints1, basepoints2, periodictime0, periodictime1, periodictime2, maxduration, remaintime, effIndexMask FROM pet_aura WHERE guid IN ($in)");
-                $this->bindIntList($stmt, $chunk);
-                $stmt->execute();
-                $rows = $stmt->fetchAll() ?: [];
-                $out = [];
+                $petIdsSrc = array_keys($petMap);
+                sort($petIdsSrc);
 
-                foreach ($rows as $r)
+                foreach (array_chunk($petIdsSrc, self::IN_CHUNK) as $chunk)
                 {
-                    $sg = (int)$r['guid'];
-                    if (!isset($petMap[$sg]))
+                    $in = $this->placeholders(count($chunk));
+                    $stmt = $src->prepare('SELECT ' . $this->schema->selectList($petAuraCols) . " FROM `pet_aura` WHERE guid IN ($in)");
+                    $this->bindIntList($stmt, $chunk);
+                    $stmt->execute();
+                    $rows = $stmt->fetchAll() ?: [];
+                    $out = [];
+
+                    foreach ($rows as $r)
                     {
-                        continue;
+                        $sg = (int)($r['guid'] ?? 0);
+                        if ($sg <= 0 || !isset($petMap[$sg]))
+                        {
+                            continue;
+                        }
+
+                        $row = [];
+                        foreach ($petAuraCols as $c)
+                        {
+                            if ($c === 'guid')
+                            {
+                                $row['guid'] = $petMap[$sg];
+                                continue;
+                            }
+
+                            if ($c === 'item_guid')
+                            {
+                                $row['item_guid'] = 0;
+                                continue;
+                            }
+
+                            $row[$c] = $r[$c] ?? null;
+                        }
+
+                        $out[] = $row;
                     }
 
-                    $ig = (int)$r['item_guid'];
-                    $out[] = [
-                        'guid' => $petMap[$sg],
-                        'caster_guid' => (int)$r['caster_guid'],
-                        'item_guid' => 0,
-                        'spell' => (int)$r['spell'],
-                        'stackcount' => (int)$r['stackcount'],
-                        'remaincharges' => (int)$r['remaincharges'],
-                        'basepoints0' => (int)$r['basepoints0'],
-                        'basepoints1' => (int)$r['basepoints1'],
-                        'basepoints2' => (int)$r['basepoints2'],
-                        'periodictime0' => (int)$r['periodictime0'],
-                        'periodictime1' => (int)$r['periodictime1'],
-                        'periodictime2' => (int)$r['periodictime2'],
-                        'maxduration' => (int)$r['maxduration'],
-                        'remaintime' => (int)$r['remaintime'],
-                        'effIndexMask' => (int)$r['effIndexMask'],
-                    ];
+                    $this->bulkInsert($dst, 'pet_aura', $petAuraCols, $out, $result, 'pet_aura');
                 }
-
-                $this->bulkInsert($dst, 'pet_aura', ['guid', 'caster_guid', 'item_guid', 'spell', 'stackcount', 'remaincharges', 'basepoints0', 'basepoints1', 'basepoints2', 'periodictime0', 'periodictime1', 'periodictime2', 'maxduration', 'remaintime', 'effIndexMask'], $out, $result, 'pet_aura');
             }
 
             $dst->commit();
@@ -730,9 +947,15 @@ final class MigrationService
      */
     private function migrateCharacterTutorial(PDO $src, PDO $dst, int $accountId, MigrationResult $result): void
     {
+        $cols = $this->resolveCommonColumns($src, $dst, 'character_tutorial', ['account'], $result);
+        if (!$cols)
+        {
+            return;
+        }
+
         $row = $this->fetchRow(
             $src,
-            'SELECT account, tut0, tut1, tut2, tut3, tut4, tut5, tut6, tut7 FROM character_tutorial WHERE account = :a',
+            'SELECT ' . $this->schema->selectList($cols) . ' FROM `character_tutorial` WHERE account = :a',
             [':a' => $accountId]
         );
 
@@ -741,26 +964,37 @@ final class MigrationService
             return;
         }
 
-        $exists = (int) $this->fetchOne($dst, 'SELECT COUNT(*) FROM character_tutorial WHERE account = :a', [':a' => $accountId]);
+        $exists = (int) $this->fetchOne($dst, 'SELECT COUNT(*) FROM `character_tutorial` WHERE account = :a', [':a' => $accountId]);
         if ($exists > 0)
         {
-            $sql = 'UPDATE character_tutorial SET
-                        tut0 = (tut0 | :tut0),
-                        tut1 = (tut1 | :tut1),
-                        tut2 = (tut2 | :tut2),
-                        tut3 = (tut3 | :tut3),
-                        tut4 = (tut4 | :tut4),
-                        tut5 = (tut5 | :tut5),
-                        tut6 = (tut6 | :tut6),
-                        tut7 = (tut7 | :tut7)
-                    WHERE account = :a';
+            $set = [];
+            foreach ($cols as $c)
+            {
+                if ($c === 'account')
+                {
+                    continue;
+                }
+
+                $set[] = '`' . $c . '` = (`' . $c . '` | :' . $c . ')';
+            }
+
+            if (!$set)
+            {
+                return;
+            }
+
+            $sql = 'UPDATE `character_tutorial` SET ' . implode(', ', $set) . ' WHERE account = :a';
             $stmt = $dst->prepare($sql);
             $stmt->bindValue(':a', $accountId, PDO::PARAM_INT);
 
-            for ($i = 0; $i <= 7; $i++)
+            foreach ($cols as $c)
             {
-                $key = 'tut' . $i;
-                $stmt->bindValue(':tut' . $i, (int) ($row[$key] ?? 0), PDO::PARAM_INT);
+                if ($c === 'account')
+                {
+                    continue;
+                }
+
+                $stmt->bindValue(':' . $c, (int) ($row[$c] ?? 0), PDO::PARAM_INT);
             }
 
             $stmt->execute();
@@ -769,7 +1003,7 @@ final class MigrationService
             return;
         }
 
-        $this->insertOne($dst, 'character_tutorial', $this->tutorialColumns(), $row, $result, 'character_tutorial');
+        $this->insertOne($dst, 'character_tutorial', $cols, $row, $result, 'character_tutorial');
     }
 
     /** @return array<string,mixed> */
@@ -832,65 +1066,101 @@ final class MigrationService
 
     private function nextGuid(PDO $pdo, string $table, string $col): int
     {
-        $max = (int)$this->fetchOne($pdo, "SELECT COALESCE(MAX($col),0) FROM $table");
+        $t = $this->q($table);
+        $c = $this->q($col);
+
+        $max = (int)$this->fetchOne($pdo, "SELECT COALESCE(MAX($c),0) FROM $t");
         return $max + 1;
     }
 
-    private function sqlSourceItemGuids(): string
+    private function q(string $name): string
     {
-        // IMPORTANT: do not reuse the same named placeholder (e.g., :g) multiple times.
-        // MySQL/MariaDB PDO with native prepared statements will treat repeated names as
-        // separate placeholders internally, causing HY093 unless each placeholder is bound.
-        return "
-            SELECT DISTINCT item AS src_item_guid
-            FROM character_inventory
-            WHERE guid = :g1 AND item <> 0
-            UNION
-            SELECT DISTINCT bag AS src_item_guid
-            FROM character_inventory
-            WHERE guid = :g2 AND bag <> 0
-            UNION
-            SELECT DISTINCT item_guid AS src_item_guid
-            FROM character_gifts
-            WHERE guid = :g3 AND item_guid <> 0
-            ORDER BY src_item_guid
-        ";
-    }
+        if (!preg_match('/^[A-Za-z0-9_]+$/', $name))
+        {
+            throw new \InvalidArgumentException('Invalid identifier: ' . $name);
+        }
 
-    private function sqlCharactersSelect(): string
-    {
-        // Keep the column list aligned with character_migration_script.sql
-        $cols = implode(', ', $this->charactersColumns());
-        return "SELECT $cols FROM characters WHERE guid = :g";
-    }
-
-    /** @return array<int,string> */
-    private function charactersColumns(): array
-    {
-        return [
-            'guid', 'account', 'name', 'race', 'class', 'gender', 'level', 'xp', 'money', 'playerBytes', 'playerBytes2', 'playerFlags',
-            'position_x', 'position_y', 'position_z', 'map', 'orientation', 'taximask', 'online', 'cinematic', 'totaltime', 'leveltime',
-            'logout_time', 'is_logout_resting', 'rest_bonus', 'resettalents_cost', 'resettalents_time', 'trans_x', 'trans_y', 'trans_z',
-            'trans_o', 'transguid', 'extra_flags', 'stable_slots', 'at_login', 'zone', 'death_expire_time', 'taxi_path',
-            'honor_highest_rank', 'honor_standing', 'stored_honor_rating', 'stored_dishonorable_kills', 'stored_honorable_kills',
-            'watchedFaction', 'drunk', 'health', 'power1', 'power2', 'power3', 'power4', 'power5', 'exploredZones', 'equipmentCache',
-            'ammoId', 'actionBars', 'deleteInfos_Account', 'deleteInfos_Name', 'deleteDate', 'createdDate',
-        ];
-    }
-
-
-    /** @return array<int,string> */
-    private function tutorialColumns(): array
-    {
-        return ['account', 'tut0', 'tut1', 'tut2', 'tut3', 'tut4', 'tut5', 'tut6', 'tut7'];
+        return '`' . $name . '`';
     }
 
     /**
-        * Insert a single associative row with explicit column order.
-        * @param array<int,string> $columns
-        * @param array<string,mixed> $row
+        * @param array<int,string> $required
+        * @return array<int,string>
         */
-    private function insertOne(PDO $dst, string $table, array $columns, array $row, MigrationResult $result, string $countKey): void
+    private function resolveCommonColumns(PDO $src, PDO $dst, string $table, array $required, MigrationResult $result): array
+    {
+        $cols = $this->schema->commonColumns($src, $dst, $table, $required);
+        if ($cols)
+        {
+            return $cols;
+        }
+
+        $srcHas = $this->schema->tableExists($src, $table);
+        $dstHas = $this->schema->tableExists($dst, $table);
+
+        if ($srcHas || $dstHas)
+        {
+            if (!$srcHas)
+            {
+                $result->warnings[] = "Skipped table '$table': not present in source schema.";
+            }
+            elseif (!$dstHas)
+            {
+                $result->warnings[] = "Skipped table '$table': not present in destination schema.";
+            }
+            else
+            {
+                $result->warnings[] = "Skipped table '$table': compatible column set could not be resolved between source and destination schemas.";
+            }
+        }
+
+        return [];
+    }
+
+    /**
+        * Build an item GUID reference query based on tables/columns that exist in the source schema.
+        *
+        * @return array{0:string,1:array<string,int>}
+        */
+    private function buildSourceItemGuidsQuery(PDO $src, int $srcGuid): array
+    {
+        $parts = [];
+        $params = [];
+
+        if ($this->schema->tableExists($src, 'character_inventory')
+            && $this->schema->columnExists($src, 'character_inventory', 'guid')
+            && $this->schema->columnExists($src, 'character_inventory', 'item'))
+        {
+            $parts[] = 'SELECT DISTINCT item AS src_item_guid FROM `character_inventory` WHERE guid = :g1 AND item <> 0';
+            $params[':g1'] = $srcGuid;
+        }
+
+        if ($this->schema->tableExists($src, 'character_inventory')
+            && $this->schema->columnExists($src, 'character_inventory', 'guid')
+            && $this->schema->columnExists($src, 'character_inventory', 'bag'))
+        {
+            $parts[] = 'SELECT DISTINCT bag AS src_item_guid FROM `character_inventory` WHERE guid = :g2 AND bag <> 0';
+            $params[':g2'] = $srcGuid;
+        }
+
+        if ($this->schema->tableExists($src, 'character_gifts')
+            && $this->schema->columnExists($src, 'character_gifts', 'guid')
+            && $this->schema->columnExists($src, 'character_gifts', 'item_guid'))
+        {
+            $parts[] = 'SELECT DISTINCT item_guid AS src_item_guid FROM `character_gifts` WHERE guid = :g3 AND item_guid <> 0';
+            $params[':g3'] = $srcGuid;
+        }
+
+        if (!$parts)
+        {
+            return ['SELECT 0 AS src_item_guid WHERE 1 = 0', []];
+        }
+
+        $sql = implode("\n            UNION\n            ", $parts) . "\n            ORDER BY src_item_guid";
+        return [$sql, $params];
+    }
+
+private function insertOne(PDO $dst, string $table, array $columns, array $row, MigrationResult $result, string $countKey): void
     {
         $out = [];
         foreach ($columns as $c)

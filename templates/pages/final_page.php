@@ -13,6 +13,13 @@ use App\Support\CharacterEnums;
     <div>
     <h1 class="h4 mb-1">Results</h1>
     <div class="text-muted">Execution completed. Review inserted counts and final records below.</div>
+    <?php if (!empty($result->sourceSchemaLabel) || !empty($result->destSchemaLabel)): ?>
+        <div class="text-muted small mt-1">
+            Detected: <span class="badge badge-soft"><?= htmlspecialchars((string)($result->sourceSchemaLabel ?? 'Unknown')) ?></span>
+            &nbsp;→&nbsp;
+            <span class="badge badge-soft"><?= htmlspecialchars((string)($result->destSchemaLabel ?? 'Unknown')) ?></span>
+        </div>
+    <?php endif; ?>
     </div>
     <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary" href="index.php">Start another migration</a>

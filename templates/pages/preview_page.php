@@ -127,6 +127,14 @@ $renderFieldTable = static function (array $row, array $fields): void {
                             <div class="text-muted small">
                                 From: <span class="badge badge-soft"><?= htmlspecialchars($fromDbName) ?></span>
                                 &nbsp;&nbsp;To: <span class="badge badge-soft"><?= htmlspecialchars($toDbName) ?></span>
+                                <?php if (!empty($plan->sourceSchemaLabel) || !empty($plan->destSchemaLabel)): ?>
+                                    <div class="mt-1">
+                                        Detected: 
+                                        <span class="badge badge-soft" title="<?= htmlspecialchars((string)($plan->sourceSchemaSummary ?? '')) ?>"><?= htmlspecialchars((string)($plan->sourceSchemaLabel ?? 'Unknown')) ?></span>
+                                        &nbsp;→&nbsp;
+                                        <span class="badge badge-soft" title="<?= htmlspecialchars((string)($plan->destSchemaSummary ?? '')) ?>"><?= htmlspecialchars((string)($plan->destSchemaLabel ?? 'Unknown')) ?></span>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         </div>
                         <div class="text-muted small">
@@ -265,6 +273,14 @@ $renderFieldTable = static function (array $row, array $fields): void {
                     <div class="text-muted small">
                         From: <span class="badge badge-soft"><?= htmlspecialchars($fromDbName) ?></span>
                         &nbsp;&nbsp;To: <span class="badge badge-soft"><?= htmlspecialchars($toDbName) ?></span>
+                        <?php if (!empty($plan->sourceSchemaLabel) || !empty($plan->destSchemaLabel)): ?>
+                            <div class="mt-1">
+                                Detected:
+                                <span class="badge badge-soft" title="<?= htmlspecialchars((string)($plan->sourceSchemaSummary ?? '')) ?>"><?= htmlspecialchars((string)($plan->sourceSchemaLabel ?? 'Unknown')) ?></span>
+                                &nbsp;→&nbsp;
+                                <span class="badge badge-soft" title="<?= htmlspecialchars((string)($plan->destSchemaSummary ?? '')) ?>"><?= htmlspecialchars((string)($plan->destSchemaLabel ?? 'Unknown')) ?></span>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="text-muted small">

@@ -7,6 +7,7 @@ require_once dirname(__DIR__) . '/src/App.php';
 require_once dirname(__DIR__) . '/src/Support/CharacterEnums.php';
 require_once dirname(__DIR__) . '/src/Db/PdoFactory.php';
 require_once dirname(__DIR__) . '/src/Db/ConnectionManager.php';
+require_once dirname(__DIR__) . '/src/Db/SchemaInspector.php';
 require_once dirname(__DIR__) . '/src/Security/Csrf.php';
 require_once dirname(__DIR__) . '/src/Migration/MigrationException.php';
 require_once dirname(__DIR__) . '/src/Migration/MigrationPlan.php';

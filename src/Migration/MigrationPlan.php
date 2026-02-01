@@ -39,6 +39,18 @@ final class MigrationPlan
     /** @var array<int,array{src_guid:int,dst_guid:int,name:string,force_rename?:bool}> */
     public array $batch = [];
 
+    /** Detected schema label for the source character database (UI-only). */
+    public string $sourceSchemaLabel = '';
+
+    /** Detected schema label for the destination character database (UI-only). */
+    public string $destSchemaLabel = '';
+
+    /** Short schema signature summary for the source (UI-only). */
+    public string $sourceSchemaSummary = '';
+
+    /** Short schema signature summary for the destination (UI-only). */
+    public string $destSchemaSummary = '';
+
     public function __construct(
         string $mode,
         string $sourceProfile,

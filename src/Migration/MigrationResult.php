@@ -20,4 +20,10 @@ final class MigrationResult
 
     /** @var array<string, mixed> */
     public array $finalCharacter = [];
+
+    /** Detected schema label for the source character database (UI-only). */
+    public string $sourceSchemaLabel = '';
+
+    /** Detected schema label for the destination character database (UI-only). */
+    public string $destSchemaLabel = '';
 }
