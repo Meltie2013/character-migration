@@ -1,6 +1,6 @@
-# GETMangos Character Migration Tool (Web UI)
+# getMangos Character Migration Tool (Web UI)
 
-A self-contained **PHP 8.x** web tool for migrating character data between **MaNGOS Zero (Vanilla)** character databases. This project implements the migration logic in application code to mirror the behavior of your SQL migration script, with a clean UI for selecting realms, previewing changes, and executing migrations.
+A self-contained **PHP 8.x** web tool for migrating character data between **MaNGOS Zero (Vanilla)** character databases. This project implements the migration logic in application code with a clean UI for selecting realms, previewing changes, and executing migrations.
 
 ## Current Support
 - ✅ **MaNGOS Zero (Vanilla)** character databases **only**
@@ -103,6 +103,7 @@ Tables currently included (MaNGOS Zero Vanilla set):
 
 ## Limitations (for now)
 - Only supports **MaNGOS Zero (Vanilla)** at this time.
+- Supports **MaNGOS One (TBC)** partially and needs testing.
 - Not intended as a public-facing tool.
 - Not optimized for massive scale; designed for accuracy and safety.
 
